@@ -4,10 +4,10 @@
   "description": "Node.js notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
-  "homepage": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-node",
+  "homepage": "https://github.com/errorgaphq/errorgap-node",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-node.git"
+    "url": "https://github.com/errorgaphq/errorgap-node.git"
   },
   "keywords": [
     "errorgap",
