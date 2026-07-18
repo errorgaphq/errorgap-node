@@ -1,7 +1,8 @@
 # @errorgap/node
 
 Node.js notifier for [Errorgap](https://errorgap.com). Captures exceptions,
-normalizes V8 stack traces, and ships notices to an Errorgap server. Ships
+normalizes V8 stack traces with bounded source excerpts for readable frames,
+and ships notices to an Errorgap server. Ships
 opt-in Express and Fastify integrations.
 
 ## Install

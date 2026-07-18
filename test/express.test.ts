@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createServer, type Server, type IncomingMessage } from "node:http";
 import { AddressInfo } from "node:net";
 import express from "express";
@@ -75,5 +75,32 @@ describe("express middleware", () => {
     const ctx = body.context as Record<string, unknown>;
     expect(ctx.action).toBe("GET");
     expect(String(ctx.url)).toContain("/boom");
+  });
+
+  it("shares explicit configuration across independently loaded package entrypoints", async () => {
+    vi.resetModules();
+    const { Errorgap: isolatedErrorgap } = await import("../src/index.js");
+    isolatedErrorgap.init({
+      endpoint: `http://127.0.0.1:${port}`,
+      projectSlug: "demo",
+      apiKey: "flk_test",
+      environment: "production",
+      async: false,
+      captureGlobals: false,
+    });
+
+    vi.resetModules();
+    const { errorgapErrorHandler: isolatedErrorHandler } = await import("../src/express.js");
+    const app = express();
+    app.get("/isolated", () => {
+      throw new Error("isolated entrypoint");
+    });
+    app.use(isolatedErrorHandler());
+
+    await request(app).get("/isolated").expect(500);
+    await isolatedErrorgap.flush();
+
+    expect(requests).toHaveLength(1);
+    expect((requests[0]!.body.context as Record<string, unknown>).environment).toBe("production");
   });
 });

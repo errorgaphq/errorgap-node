@@ -12,8 +12,23 @@ export { Configuration } from "./configuration.js";
 export { Client } from "./client.js";
 export { VERSION };
 
-let configuration = new Configuration();
-let client = new Client(configuration);
+interface RuntimeState {
+  configuration: Configuration;
+  client: Client;
+}
+
+const RUNTIME_STATE_KEY = Symbol.for("@errorgap/node/runtime-state");
+
+function runtimeState(): RuntimeState {
+  const runtimeGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
+  const existing = runtimeGlobal[RUNTIME_STATE_KEY] as RuntimeState | undefined;
+  if (existing) return existing;
+
+  const configuration = new Configuration();
+  const state = { configuration, client: new Client(configuration) };
+  runtimeGlobal[RUNTIME_STATE_KEY] = state;
+  return state;
+}
 
 export interface InitOptions extends ConfigurationInput {
   /**
@@ -25,10 +40,11 @@ export interface InitOptions extends ConfigurationInput {
 
 function init(options: InitOptions = {}): void {
   const { captureGlobals = true, ...rest } = options;
-  configuration = new Configuration(rest);
-  client.configure(configuration);
+  const state = runtimeState();
+  state.configuration = new Configuration(rest);
+  state.client.configure(state.configuration);
   if (captureGlobals) {
-    installProcessHandlers(client);
+    installProcessHandlers(state.client);
   } else {
     uninstallProcessHandlers();
   }
@@ -38,19 +54,19 @@ function notify(
   error: unknown,
   options: NoticeContext & { sync?: boolean } = {},
 ): Promise<DeliveryResult> {
-  return client.notify(error, options);
+  return runtimeState().client.notify(error, options);
 }
 
 function flush(): Promise<void> {
-  return client.flush();
+  return runtimeState().client.flush();
 }
 
 function getConfiguration(): Configuration {
-  return configuration;
+  return runtimeState().configuration;
 }
 
 function getClient(): Client {
-  return client;
+  return runtimeState().client;
 }
 
 export const Errorgap = {
