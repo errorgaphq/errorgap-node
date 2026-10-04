@@ -1,6 +1,17 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
+import { SpanCollector, TRACE_HEADER, browserTraceId } from "./apm.js";
 import { Errorgap } from "./index.js";
+import { newTransactionId, runInTransaction } from "./transaction-context.js";
+
+const STATE_KEY = Symbol.for("@errorgap/node/fastify-transaction");
+
+interface RequestTransaction {
+  id: string;
+  spans: SpanCollector;
+  startedAt: string;
+  start: number;
+}
 
 export interface ErrorgapFastifyOptions {
   /**
@@ -12,6 +23,40 @@ export interface ErrorgapFastifyOptions {
 
 export const errorgapPlugin = fp<ErrorgapFastifyOptions>(
   async (fastify: FastifyInstance, options) => {
+    // Each request is an APM transaction (sent with apmEnabled). Running the
+    // rest of the lifecycle inside the transaction scope makes errors
+    // reported from handlers, and by the error handler below, carry its id.
+    fastify.addHook("onRequest", (request, _reply, done) => {
+      const id = newTransactionId();
+      const state: RequestTransaction = {
+        id,
+        spans: new SpanCollector(),
+        startedAt: new Date().toISOString(),
+        start: performance.now(),
+      };
+      (request as unknown as Record<symbol, unknown>)[STATE_KEY] = state;
+      runInTransaction(id, () => done());
+    });
+
+    fastify.addHook("onResponse", async (request, reply) => {
+      const state = (request as unknown as Record<symbol, unknown>)[STATE_KEY] as
+        | RequestTransaction
+        | undefined;
+      if (!state) return;
+      void Errorgap.notifyTransaction({
+        id: state.id,
+        traceId: browserTraceId(request.headers[TRACE_HEADER]),
+        kind: "web",
+        method: request.method,
+        path: request.routeOptions?.url ?? request.url.split("?")[0],
+        pathRaw: request.url.split("?")[0],
+        statusCode: reply.statusCode,
+        durationMs: performance.now() - state.start,
+        occurredAt: state.startedAt,
+        spans: state.spans.snapshot(),
+      });
+    });
+
     fastify.setErrorHandler(async (err, request, reply) => {
       await Errorgap.notify(err, {
         sync: true,
@@ -26,6 +71,17 @@ export const errorgapPlugin = fp<ErrorgapFastifyOptions>(
   },
   { name: "errorgap", fastify: "4.x" },
 );
+
+/**
+ * The span collector for this request's transaction, for recording DB and
+ * outbound HTTP spans from route handlers.
+ */
+export function requestSpans(request: FastifyRequest): SpanCollector | undefined {
+  const state = (request as unknown as Record<symbol, unknown>)[STATE_KEY] as
+    | RequestTransaction
+    | undefined;
+  return state?.spans;
+}
 
 function requestContext(req: FastifyRequest): Record<string, unknown> {
   return {

@@ -123,6 +123,12 @@ const app = Fastify();
 await app.register(errorgapPlugin);
 ```
 
+The plugin also records each request as an APM transaction (with
+`apmEnabled: true`) under its route template (`/orders/:id`), links errors
+reported during it, and records the browser SDK's `x-errorgap-trace` header.
+Record spans with `requestSpans(request)?.database(sql, ms)` from
+`@errorgap/node/fastify`.
+
 ## Configuration reference
 
 | Option | Default | Notes |
