@@ -1,6 +1,6 @@
 {
   "name": "@errorgap/node",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Node.js notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",

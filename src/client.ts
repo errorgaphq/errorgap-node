@@ -1,5 +1,7 @@
 import type { Configuration } from "./configuration.js";
+import { transactionPayload, type Transaction } from "./apm.js";
 import { buildNotice, type NoticeContext, type NoticePayload } from "./notice.js";
+import { currentTransactionId } from "./transaction-context.js";
 import { VERSION } from "./version.js";
 
 export interface DeliveryResult {
@@ -25,7 +27,7 @@ export class Client {
     try {
       this.configuration.validate();
       const err = coerceError(error);
-      const notice = buildNotice(err, this.configuration, options);
+      const notice = buildNotice(err, this.configuration, withTransaction(options));
 
       if (options.sync || !this.configuration.async) {
         const p = this.deliver(notice);
@@ -42,6 +44,30 @@ export class Client {
     }
   }
 
+  /**
+   * Deliver an APM transaction (HTTP interaction or background job). Dropped
+   * unless `apmEnabled`, and sampled by `apmSampleRate`.
+   */
+  async notifyTransaction(
+    transaction: Transaction,
+    options: { sync?: boolean } = {},
+  ): Promise<DeliveryResult> {
+    try {
+      this.configuration.validate();
+    } catch (exception) {
+      this.log(exception);
+      return { error: exception };
+    }
+    if (!this.configuration.apmEnabled) return { status: 204 };
+    const rate = this.configuration.apmSampleRate;
+    if (!(rate >= 1 || (rate > 0 && Math.random() < rate))) return { status: 204 };
+
+    const p = this.post("transactions", transactionPayload(transaction, this.configuration));
+    this.track(p);
+    if (options.sync || !this.configuration.async) return await p;
+    return { queued: true, status: 202 };
+  }
+
   /** Await every in-flight delivery. Use during graceful shutdown. */
   async flush(): Promise<void> {
     while (this.pending.size > 0) {
@@ -56,7 +82,11 @@ export class Client {
   }
 
   async deliver(notice: NoticePayload): Promise<DeliveryResult> {
-    const url = noticesUrl(this.configuration);
+    return this.post("notices", notice);
+  }
+
+  private async post(resource: string, payload: unknown): Promise<DeliveryResult> {
+    const url = projectUrl(this.configuration, resource);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "user-agent": `errorgap-node/${VERSION}`,
@@ -69,7 +99,7 @@ export class Client {
       const response = await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(notice),
+        body: JSON.stringify(payload),
       });
       const body = await safeBody(response);
       return { status: response.status, body };
@@ -90,11 +120,11 @@ export class Client {
   }
 }
 
-function noticesUrl(configuration: Configuration): string {
+function projectUrl(configuration: Configuration, resource: string): string {
   const base = configuration.endpoint.endsWith("/")
     ? configuration.endpoint.slice(0, -1)
     : configuration.endpoint;
-  return `${base}/api/projects/${configuration.projectSlug}/notices`;
+  return `${base}/api/projects/${configuration.projectSlug}/${resource}`;
 }
 
 async function safeBody(response: Response): Promise<string> {
@@ -115,4 +145,11 @@ function coerceError(error: unknown): Error {
     return err;
   }
   return new Error(String(error));
+}
+
+/** Errors reported inside a transaction carry its id, unless set explicitly. */
+function withTransaction<T extends NoticeContext>(options: T): T {
+  const id = currentTransactionId();
+  if (!id || (options.context && "transaction_id" in options.context)) return options;
+  return { ...options, context: { ...(options.context ?? {}), transaction_id: id } };
 }
