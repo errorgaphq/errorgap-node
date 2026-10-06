@@ -129,6 +129,26 @@ reported during it, and records the browser SDK's `x-errorgap-trace` header.
 Record spans with `requestSpans(request)?.database(sql, ms)` from
 `@errorgap/node/fastify`.
 
+## Sign-ins
+
+Report sign-ins to your app; errorgap shows them beside SSH logins in
+Security › Logins and flags a new IP, country or hour for a user. Off until
+you opt in, since events carry user names and IPs:
+
+```ts
+Errorgap.init({ projectSlug: "ox-coffee", apiKey: process.env.ERRORGAP_API_KEY, authEvents: true, appName: "oxcoffee-web" });
+
+// after your own credential check:
+Errorgap.signIn(ok ? "success" : "failure", { user: email, req });
+Errorgap.signIn("mfa_failure", { user: email, req });
+```
+
+Outcomes: `success`, `failure`, `password_reset`, `mfa_failure`, `locked`.
+`req` (Express, Fastify or a plain Node request) supplies the IP (Express and
+Fastify honor their trust-proxy setting), user agent and path, without the
+query string. Never pass passwords or tokens; errorgap can also store user
+names hashed (Security › Logins › Web apps › Privacy).
+
 ## Configuration reference
 
 | Option | Default | Notes |
@@ -145,6 +165,8 @@ Record spans with `requestSpans(request)?.database(sql, ms)` from
 | `apmEnabled` | `false` | Send APM transactions |
 | `apmSampleRate` | `1.0` | Fraction of transactions sent (errors are unaffected) |
 | `captureGlobals` | `true` | Install process error hooks |
+| `authEvents` | `false` | Send `signIn` events |
+| `appName` | `ERRORGAP_APP_NAME` or the project slug | The app's name in Security › Logins |
 
 ## Verify
 
