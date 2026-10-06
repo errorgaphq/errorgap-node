@@ -15,6 +15,10 @@ export interface ConfigurationInput {
   filterKeys?: string[];
   apmEnabled?: boolean;
   apmSampleRate?: number;
+  /** Report sign-ins (`signIn`). Off by default: events carry user names and IPs. */
+  authEvents?: boolean;
+  /** The app's name in Security › Logins. Defaults to the project slug. */
+  appName?: string;
 }
 
 const DEFAULT_FILTER_KEYS = [
@@ -39,6 +43,8 @@ export class Configuration {
   filterKeys: string[];
   apmEnabled: boolean;
   apmSampleRate: number;
+  authEvents: boolean;
+  appName: string | undefined;
 
   constructor(input: ConfigurationInput = {}) {
     this.endpoint =
@@ -54,6 +60,8 @@ export class Configuration {
     this.filterKeys = input.filterKeys ?? [...DEFAULT_FILTER_KEYS];
     this.apmEnabled = input.apmEnabled ?? false;
     this.apmSampleRate = input.apmSampleRate ?? 1.0;
+    this.authEvents = input.authEvents ?? false;
+    this.appName = input.appName ?? process.env.ERRORGAP_APP_NAME;
   }
 
   validate(): void {

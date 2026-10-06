@@ -3,6 +3,7 @@ import { transactionPayload, type Transaction } from "./apm.js";
 import { buildNotice, type NoticeContext, type NoticePayload } from "./notice.js";
 import { currentTransactionId } from "./transaction-context.js";
 import { VERSION } from "./version.js";
+import { buildSignIn, signInPayload, type SignInOptions } from "./sign-ins.js";
 
 export interface DeliveryResult {
   status?: number;
@@ -63,6 +64,29 @@ export class Client {
     if (!(rate >= 1 || (rate > 0 && Math.random() < rate))) return { status: 204 };
 
     const p = this.post("transactions", transactionPayload(transaction, this.configuration));
+    this.track(p);
+    if (options.sync || !this.configuration.async) return await p;
+    return { queued: true, status: 202 };
+  }
+
+  /**
+   * Report a sign-in to this app (Security › Logins). Dropped unless
+   * `authEvents` is on, or when the outcome is unknown.
+   */
+  async signIn(outcome: string, options: SignInOptions = {}): Promise<DeliveryResult> {
+    try {
+      this.configuration.validate();
+    } catch (exception) {
+      this.log(exception);
+      return { error: exception };
+    }
+    if (!this.configuration.authEvents) return { status: 204 };
+    const event = buildSignIn(outcome, options);
+    if (!event) {
+      this.log(new Error(`unknown sign-in outcome ${JSON.stringify(outcome)}`));
+      return { status: 204 };
+    }
+    const p = this.post("logins/web", signInPayload(event, this.configuration));
     this.track(p);
     if (options.sync || !this.configuration.async) return await p;
     return { queued: true, status: 202 };

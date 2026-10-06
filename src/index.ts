@@ -5,6 +5,7 @@ import type { NoticeContext } from "./notice.js";
 import { SpanCollector, type Transaction } from "./apm.js";
 import { currentTransactionId, newTransactionId, runInTransaction } from "./transaction-context.js";
 import { VERSION } from "./version.js";
+import type { SignInOptions, SignInOutcome } from "./sign-ins.js";
 
 export type { ConfigurationInput, Logger } from "./configuration.js";
 export type { NoticeContext, NoticePayload } from "./notice.js";
@@ -15,6 +16,7 @@ export { Client } from "./client.js";
 export type { Span, SpanLocation, Transaction } from "./apm.js";
 export { SpanCollector, TRACE_HEADER, browserTraceId, normalizeSql } from "./apm.js";
 export { currentTransactionId, newTransactionId, runInTransaction } from "./transaction-context.js";
+export type { SignInOptions, SignInOutcome, SignInRequest } from "./sign-ins.js";
 export { VERSION };
 
 interface RuntimeState {
@@ -127,6 +129,15 @@ async function trackJob<T>(
   }
 }
 
+/**
+ * Report a sign-in to this app: "success", "failure", "password_reset",
+ * "mfa_failure" or "locked". Pass `req` for its IP, user agent and path.
+ * Needs `authEvents: true` in `init`.
+ */
+function signIn(outcome: SignInOutcome, options: SignInOptions = {}): Promise<DeliveryResult> {
+  return runtimeState().client.signIn(outcome, options);
+}
+
 function flush(): Promise<void> {
   return runtimeState().client.flush();
 }
@@ -145,6 +156,7 @@ export const Errorgap = {
   notifyTransaction,
   trackTransaction,
   trackJob,
+  signIn,
   currentTransactionId,
   runInTransaction,
   flush,
@@ -153,4 +165,4 @@ export const Errorgap = {
   VERSION,
 };
 
-export { init, notify, notifyTransaction, trackTransaction, trackJob, flush };
+export { init, notify, notifyTransaction, trackTransaction, trackJob, signIn, flush };
