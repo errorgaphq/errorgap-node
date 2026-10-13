@@ -7,8 +7,9 @@ import { currentTransactionId, newTransactionId, runInTransaction } from "./tran
 import { VERSION } from "./version.js";
 import type { SignInOptions, SignInOutcome } from "./sign-ins.js";
 
-export type { ConfigurationInput, Logger } from "./configuration.js";
-export type { NoticeContext, NoticePayload } from "./notice.js";
+export type { BeforeNotify, ConfigurationInput, Logger } from "./configuration.js";
+export type { NoticeContext, NoticePayload, NoticeUser } from "./notice.js";
+export type { FilterKey } from "./filter.js";
 export type { BacktraceFrame } from "./backtrace.js";
 export type { DeliveryResult } from "./client.js";
 export { Configuration } from "./configuration.js";
@@ -43,15 +44,21 @@ export interface InitOptions extends ConfigurationInput {
    * `unhandledRejection`. Defaults to `true`.
    */
   captureGlobals?: boolean;
+  /**
+   * After reporting an uncaught exception or unhandled rejection, exit with
+   * code 1 as Node does without a listener, unless the app has its own
+   * listener for the event. Defaults to `true`.
+   */
+  exitOnUncaught?: boolean;
 }
 
 function init(options: InitOptions = {}): void {
-  const { captureGlobals = true, ...rest } = options;
+  const { captureGlobals = true, exitOnUncaught = true, ...rest } = options;
   const state = runtimeState();
   state.configuration = new Configuration(rest);
   state.client.configure(state.configuration);
   if (captureGlobals) {
-    installProcessHandlers(state.client);
+    installProcessHandlers(state.client, { exitOnUncaught });
   } else {
     uninstallProcessHandlers();
   }
@@ -138,6 +145,16 @@ function signIn(outcome: SignInOutcome, options: SignInOptions = {}): Promise<De
   return runtimeState().client.signIn(outcome, options);
 }
 
+/**
+ * Record a release with errorgap (Deploys). Call it from a deploy script, or
+ * set `trackRelease: true` to record it when the first error is reported.
+ */
+function trackRelease(
+  release: { version?: string; sha?: string; branch?: string; environment?: string } = {},
+): Promise<DeliveryResult> {
+  return runtimeState().client.trackRelease(release);
+}
+
 function flush(): Promise<void> {
   return runtimeState().client.flush();
 }
@@ -157,6 +174,7 @@ export const Errorgap = {
   trackTransaction,
   trackJob,
   signIn,
+  trackRelease,
   currentTransactionId,
   runInTransaction,
   flush,
@@ -165,4 +183,4 @@ export const Errorgap = {
   VERSION,
 };
 
-export { init, notify, notifyTransaction, trackTransaction, trackJob, signIn, flush };
+export { init, notify, notifyTransaction, trackTransaction, trackJob, signIn, trackRelease, flush };

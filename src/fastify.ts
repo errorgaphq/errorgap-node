@@ -58,8 +58,8 @@ export const errorgapPlugin = fp<ErrorgapFastifyOptions>(
     });
 
     fastify.setErrorHandler(async (err, request, reply) => {
-      await Errorgap.notify(err, {
-        sync: true,
+      // Queued, not awaited: errorgap being slow must not delay the response.
+      void Errorgap.notify(err, {
         context: requestContext(request),
         environment: requestEnvironment(request),
         params: requestParams(request),

@@ -74,13 +74,25 @@ function captureRoute(req: Request): () => string | undefined {
 
 export function errorgapErrorHandler(): ErrorRequestHandler {
   return (err, req, _res, next) => {
+    // Queued, not awaited: errorgap being slow must not delay the response.
     void Errorgap.notify(err, {
-      sync: true,
+      user: requestUser(req),
       context: requestContext(req),
       environment: requestEnvironment(req),
       params: requestParams(req),
     });
     next(err);
+  };
+}
+
+/** The signed-in user as Passport and most auth middleware expose it (`req.user`). */
+function requestUser(req: Request): { id?: string | number; email?: string } | undefined {
+  const user = (req as Request & { user?: unknown }).user;
+  if (!user || typeof user !== "object") return undefined;
+  const { id, email } = user as { id?: unknown; email?: unknown };
+  return {
+    id: typeof id === "string" || typeof id === "number" ? id : undefined,
+    email: typeof email === "string" ? email : undefined,
   };
 }
 

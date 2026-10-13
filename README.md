@@ -34,6 +34,44 @@ Errorgap.init({
 don't pass them. `init` installs `uncaughtException` and `unhandledRejection`
 hooks by default — pass `captureGlobals: false` to skip.
 
+After reporting an uncaught exception or unhandled rejection the SDK exits the
+process with code 1, as Node does when nothing listens for those events (a
+process that carries on after one is in an unknown state). It leaves the exit
+to you when your app has its own listener for the event, or with
+`exitOnUncaught: false`.
+
+### Filtering and dropping notices
+
+```ts
+Errorgap.init({
+  filterKeys: ["password", "token", /^ssn$/],
+  beforeNotify(notice) {
+    if (notice.errors[0]?.type === "AbortError") return false; // drop it
+    notice.context.team = "billing";                            // or change it
+  },
+});
+```
+
+`filterKeys` are masked at any depth in `params` and `session`. Values that
+cannot be serialized (cycles, bigints) and oversized strings or collections
+are cut rather than losing the notice.
+
+### Users, causes and releases
+
+`notify(err, { user: { id, email } })` names the user an error happened to;
+the Express error handler reads `req.user` for you. An error's `cause` chain
+is reported with it. `release` defaults to `ERRORGAP_RELEASE`, the hosting
+platform's commit variable (`SOURCE_VERSION`, `HEROKU_SLUG_COMMIT`,
+`RENDER_GIT_COMMIT`, `VERCEL_GIT_COMMIT_SHA`, …) or the git checkout, and
+`await Errorgap.trackRelease({ sha, branch })` records a deploy.
+
+### Delivery
+
+Notices are queued (at most `queueSize`, oldest dropped first) and sent a few
+at a time with a `timeout`. A send that fails on the network or with a 5xx is
+retried up to three times; after a 429 the SDK stops sending for the server's
+`Retry-After`. `await Errorgap.flush()` before a planned exit.
+
 ## Manual notification
 
 ```ts
@@ -161,7 +199,14 @@ names hashed (Security › Logins › Web apps › Privacy).
 | `rootDirectory` | `process.cwd()` | Used to mark frames as `in_app` |
 | `async` | `true` | Fire-and-forget delivery |
 | `logger` | `console` | Pass `null` to silence |
-| `filterKeys` | `["password", "token", "secret", ...]` | Substring match, case-insensitive |
+| `filterKeys` | `["password", "token", "secret", ...]` | Substrings (case-insensitive) or regexps, any depth |
+| `beforeNotify` | none | Change a notice, or return `false` to drop it |
+| `release` | `ERRORGAP_RELEASE`, platform commit variable, git checkout | Sent as `context.release` |
+| `trackRelease` | `false` | Record the release when the first error is reported |
+| `ignoreEnvironments` | `ERRORGAP_IGNORE_ENVIRONMENTS` or `[]` | Send nothing in these environments |
+| `timeout` | `5` | Seconds per request |
+| `queueSize` | `100` | Queued payloads; the oldest is dropped when full |
+| `exitOnUncaught` | `true` | Exit with code 1 after reporting an uncaught error |
 | `apmEnabled` | `false` | Send APM transactions |
 | `apmSampleRate` | `1.0` | Fraction of transactions sent (errors are unaffected) |
 | `captureGlobals` | `true` | Install process error hooks |
