@@ -2,6 +2,7 @@ import type { ErrorRequestHandler, Request, RequestHandler, Response } from "exp
 import { SpanCollector, TRACE_HEADER, browserTraceId } from "./apm.js";
 import { Errorgap } from "./index.js";
 import { newTransactionId, runInTransaction } from "./transaction-context.js";
+import { collectSpans } from "./instrument.js";
 
 const SPANS_KEY = Symbol.for("@errorgap/node/express-spans");
 
@@ -21,9 +22,11 @@ export function errorgapRequestHandler(): RequestHandler {
     const start = performance.now();
     const matched = captureRoute(req);
     let recorded = false;
+    const done = collectSpans(id, spans);
     const record = () => {
       if (recorded) return;
       recorded = true;
+      done();
       void Errorgap.notifyTransaction({
         id,
         traceId: browserTraceId(req.get(TRACE_HEADER)),

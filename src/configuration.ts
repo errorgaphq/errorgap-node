@@ -44,6 +44,11 @@ export interface ConfigurationInput {
   queueSize?: number;
   beforeNotify?: BeforeNotify;
   apmEnabled?: boolean;
+  /**
+   * With APM on, record SQL queries (`pg`, `mysql2`, `mysql`) and outbound
+   * HTTP calls as spans automatically. Defaults to true.
+   */
+  autoInstrument?: boolean;
   apmSampleRate?: number;
   /** Report sign-ins (`signIn`). Off by default: events carry user names and IPs. */
   authEvents?: boolean;
@@ -80,6 +85,7 @@ export class Configuration {
   queueSize: number;
   beforeNotify: BeforeNotify | undefined;
   apmEnabled: boolean;
+  autoInstrument: boolean;
   apmSampleRate: number;
   authEvents: boolean;
   appName: string | undefined;
@@ -110,6 +116,7 @@ export class Configuration {
     this.queueSize = input.queueSize ?? 100;
     this.beforeNotify = input.beforeNotify;
     this.apmEnabled = input.apmEnabled ?? false;
+    this.autoInstrument = input.autoInstrument ?? true;
     this.apmSampleRate = input.apmSampleRate ?? 1.0;
     this.authEvents = input.authEvents ?? false;
     this.appName = input.appName ?? process.env.ERRORGAP_APP_NAME;

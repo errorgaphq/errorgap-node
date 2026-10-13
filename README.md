@@ -127,6 +127,28 @@ so the browser Performance view links each call to the server request that
 answered it. Cross-origin APIs need the header allowed by CORS and listed in
 the browser SDK's `performance.tracePropagationTargets`.
 
+### Automatic query and HTTP spans
+
+With `apmEnabled`, the SDK records spans on whichever transaction is running,
+with no code in your handlers:
+
+- SQL queries made through `pg`, `mysql2` (including `mysql2/promise`) and
+  `mysql`, with literals replaced by `?`;
+- outbound `fetch` and `http`/`https` calls, named by method and host
+  (`GET api.stripe.com`). Calls to errorgap itself are left out.
+
+The drivers are found in your app's `node_modules` at `init`. If yours are
+loaded differently (a bundler, a monorepo), pass them in:
+
+```ts
+import pg from "pg";
+import { instrumentPg } from "@errorgap/node";
+
+instrumentPg(pg); // also instrumentMysql2(mysql2), instrumentHttp()
+```
+
+`autoInstrument: false` turns all of it off.
+
 ## Transactions and jobs
 
 ```ts
@@ -208,6 +230,7 @@ names hashed (Security › Logins › Web apps › Privacy).
 | `queueSize` | `100` | Queued payloads; the oldest is dropped when full |
 | `exitOnUncaught` | `true` | Exit with code 1 after reporting an uncaught error |
 | `apmEnabled` | `false` | Send APM transactions |
+| `autoInstrument` | `true` | With APM on, record `pg`/`mysql2`/`mysql` queries and outbound HTTP as spans |
 | `apmSampleRate` | `1.0` | Fraction of transactions sent (errors are unaffected) |
 | `captureGlobals` | `true` | Install process error hooks |
 | `authEvents` | `false` | Send `signIn` events |

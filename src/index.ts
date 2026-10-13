@@ -5,6 +5,7 @@ import type { NoticeContext } from "./notice.js";
 import { SpanCollector, type Transaction } from "./apm.js";
 import { currentTransactionId, newTransactionId, runInTransaction } from "./transaction-context.js";
 import { VERSION } from "./version.js";
+import { collectSpans, instrumentInstalled } from "./instrument.js";
 import type { SignInOptions, SignInOutcome } from "./sign-ins.js";
 
 export type { BeforeNotify, ConfigurationInput, Logger } from "./configuration.js";
@@ -18,6 +19,14 @@ export type { Span, SpanLocation, Transaction } from "./apm.js";
 export { SpanCollector, TRACE_HEADER, browserTraceId, normalizeSql } from "./apm.js";
 export { currentTransactionId, newTransactionId, runInTransaction } from "./transaction-context.js";
 export type { SignInOptions, SignInOutcome, SignInRequest } from "./sign-ins.js";
+export {
+  collectSpans,
+  currentSpans,
+  instrumentHttp,
+  instrumentMysql,
+  instrumentMysql2,
+  instrumentPg,
+} from "./instrument.js";
 export { VERSION };
 
 interface RuntimeState {
@@ -57,6 +66,9 @@ function init(options: InitOptions = {}): void {
   const state = runtimeState();
   state.configuration = new Configuration(rest);
   state.client.configure(state.configuration);
+  if (state.configuration.apmEnabled && state.configuration.autoInstrument) {
+    instrumentInstalled(state.configuration.rootDirectory, state.configuration.endpoint);
+  }
   if (captureGlobals) {
     installProcessHandlers(state.client, { exitOnUncaught });
   } else {
@@ -92,9 +104,11 @@ async function trackTransaction<T>(
   const startedAt = new Date().toISOString();
   const start = performance.now();
   const id = meta.id ?? newTransactionId();
+  const done = collectSpans(id, spans);
   try {
     return await runInTransaction(id, () => operation(spans));
   } finally {
+    done();
     void notifyTransaction({
       kind: meta.kind ?? "web",
       ...meta,
@@ -120,9 +134,11 @@ async function trackJob<T>(
   const startedAt = new Date().toISOString();
   const start = performance.now();
   const id = newTransactionId();
+  const done = collectSpans(id, spans);
   try {
     return await runInTransaction(id, () => operation(spans));
   } finally {
+    done();
     void notifyTransaction({
       id,
       kind: "job",

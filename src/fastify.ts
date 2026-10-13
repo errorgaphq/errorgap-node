@@ -3,6 +3,7 @@ import fp from "fastify-plugin";
 import { SpanCollector, TRACE_HEADER, browserTraceId } from "./apm.js";
 import { Errorgap } from "./index.js";
 import { newTransactionId, runInTransaction } from "./transaction-context.js";
+import { collectSpans } from "./instrument.js";
 
 const STATE_KEY = Symbol.for("@errorgap/node/fastify-transaction");
 
@@ -11,6 +12,8 @@ interface RequestTransaction {
   spans: SpanCollector;
   startedAt: string;
   start: number;
+  /** Stops automatic spans being collected for this request. */
+  done?: () => void;
 }
 
 export interface ErrorgapFastifyOptions {
@@ -35,6 +38,7 @@ export const errorgapPlugin = fp<ErrorgapFastifyOptions>(
         start: performance.now(),
       };
       (request as unknown as Record<symbol, unknown>)[STATE_KEY] = state;
+      state.done = collectSpans(id, state.spans);
       runInTransaction(id, () => done());
     });
 
@@ -43,6 +47,7 @@ export const errorgapPlugin = fp<ErrorgapFastifyOptions>(
         | RequestTransaction
         | undefined;
       if (!state) return;
+      state.done?.();
       void Errorgap.notifyTransaction({
         id: state.id,
         traceId: browserTraceId(request.headers[TRACE_HEADER]),
