@@ -246,6 +246,25 @@ names hashed (Security › Logins › Web apps › Privacy).
 | `authEvents` | `false` | Send `signIn` events |
 | `appName` | `ERRORGAP_APP_NAME` or the project slug | The app's name in Security › Logins |
 
+## Command line
+
+The package ships an `errorgap` command for terminals and deploy scripts:
+
+```sh
+npx @errorgap/node test                                   # send a test error
+npx @errorgap/node deploy --sha "$GIT_SHA" --branch main  # record a release
+npx @errorgap/node sourcemaps dist --release "$GIT_SHA"   # upload every .map
+npx @errorgap/node settings                               # what the project's SDKs are told to send
+```
+
+It reads `ERRORGAP_ENDPOINT`, `ERRORGAP_PROJECT_SLUG`, `ERRORGAP_API_KEY` and,
+for `deploy` and `sourcemaps`, the project's secret `ERRORGAP_UPLOAD_KEY`
+(or `--endpoint`, `--project`, `--key`, `--upload-key`). `sourcemaps` files
+each map under the URL of its script: `dist/assets/app.js.map` becomes
+`/assets/app.js`, or `/static/assets/app.js` with `--url-prefix /static`.
+Every command exits non-zero when errorgap did not accept the request, so a
+deploy script can fail on it or ignore it.
+
 ## Verify
 
 ```sh

@@ -38,6 +38,9 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "errorgap": "./dist/cli.cjs"
+  },
   "files": [
     "dist",
     "README.md",
