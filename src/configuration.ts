@@ -43,6 +43,12 @@ export interface ConfigurationInput {
   /** Payloads held for sending; the oldest is dropped when full. Default 100. */
   queueSize?: number;
   beforeNotify?: BeforeNotify;
+  /**
+   * Follow the project's settings in errorgap (Project settings › What SDKs
+   * send): stop sending errors or performance data when they are switched
+   * off there. Defaults to true; `ERRORGAP_REMOTE_SETTINGS=false` turns it off.
+   */
+  remoteSettings?: boolean;
   apmEnabled?: boolean;
   /**
    * With APM on, record SQL queries (`pg`, `mysql2`, `mysql`) and outbound
@@ -84,6 +90,7 @@ export class Configuration {
   timeout: number;
   queueSize: number;
   beforeNotify: BeforeNotify | undefined;
+  remoteSettings: boolean;
   apmEnabled: boolean;
   autoInstrument: boolean;
   apmSampleRate: number;
@@ -115,6 +122,8 @@ export class Configuration {
     this.timeout = input.timeout ?? 5;
     this.queueSize = input.queueSize ?? 100;
     this.beforeNotify = input.beforeNotify;
+    this.remoteSettings =
+      input.remoteSettings ?? (process.env.ERRORGAP_REMOTE_SETTINGS ?? "").trim().toLowerCase() !== "false";
     this.apmEnabled = input.apmEnabled ?? false;
     this.autoInstrument = input.autoInstrument ?? true;
     this.apmSampleRate = input.apmSampleRate ?? 1.0;

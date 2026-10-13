@@ -6,11 +6,14 @@ import { VERSION } from "./version.js";
 import { buildSignIn, signInPayload, type SignInOptions } from "./sign-ins.js";
 
 import { Delivery, type DeliveryResult } from "./delivery.js";
+import { RemoteSettings } from "./remote-settings.js";
 
 export type { DeliveryResult } from "./delivery.js";
 
 export class Client {
   private releaseRecorded = false;
+  /** What errorgap wants this app to send (the project's remote settings). */
+  readonly remote = new RemoteSettings(() => this.configuration);
   private delivery = new Delivery(() => ({
     endpoint: this.configuration.endpoint,
     projectSlug: this.configuration.projectSlug,
@@ -25,6 +28,7 @@ export class Client {
 
   configure(configuration: Configuration): void {
     this.configuration = configuration;
+    this.remote.stop();
   }
 
   async notify(
@@ -34,6 +38,9 @@ export class Client {
     try {
       this.configuration.validate();
       if (this.configuration.ignoredEnvironment()) return { status: 202, body: "ignored environment" };
+      if (!this.remote.enabled("errors")) {
+        return { status: 202, body: "errors are switched off for this project" };
+      }
       const err = coerceError(error);
       const notice = await this.runHook(
         buildNotice(err, this.configuration, withTransaction(options)),
@@ -67,6 +74,7 @@ export class Client {
       return { error: exception };
     }
     if (!this.configuration.apmEnabled || this.configuration.ignoredEnvironment()) return { status: 204 };
+    if (!this.remote.enabled("apm")) return { status: 204 };
     const rate = this.configuration.apmSampleRate;
     if (!(rate >= 1 || (rate > 0 && Math.random() < rate))) return { status: 204 };
 

@@ -65,6 +65,15 @@ platform's commit variable (`SOURCE_VERSION`, `HEROKU_SLUG_COMMIT`,
 `RENDER_GIT_COMMIT`, `VERCEL_GIT_COMMIT_SHA`, …) or the git checkout, and
 `await Errorgap.trackRelease({ sha, branch })` records a deploy.
 
+### Remote settings
+
+Errors and performance data can each be switched off for a project in errorgap
+(Project settings › What SDKs send). Running apps follow within ten minutes,
+with no deploy: the SDK re-reads `GET /api/projects/:slug/config` in the
+background. If errorgap cannot be reached, everything stays on.
+`remoteSettings: false` (or `ERRORGAP_REMOTE_SETTINGS=false`) ignores the
+project's switches.
+
 ### Delivery
 
 Notices are queued (at most `queueSize`, oldest dropped first) and sent a few
@@ -228,6 +237,7 @@ names hashed (Security › Logins › Web apps › Privacy).
 | `ignoreEnvironments` | `ERRORGAP_IGNORE_ENVIRONMENTS` or `[]` | Send nothing in these environments |
 | `timeout` | `5` | Seconds per request |
 | `queueSize` | `100` | Queued payloads; the oldest is dropped when full |
+| `remoteSettings` | `true` | Follow the project's switches in errorgap |
 | `exitOnUncaught` | `true` | Exit with code 1 after reporting an uncaught error |
 | `apmEnabled` | `false` | Send APM transactions |
 | `autoInstrument` | `true` | With APM on, record `pg`/`mysql2`/`mysql` queries and outbound HTTP as spans |

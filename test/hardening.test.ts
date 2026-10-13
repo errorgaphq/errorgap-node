@@ -209,3 +209,54 @@ describe("process handlers", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 });
+
+describe("remote settings", () => {
+  function configServer(body: object, status = 200): Promise<{ port: number; seen: Array<[string | undefined, unknown]> }> {
+    const seen: Array<[string | undefined, unknown]> = [];
+    server = createServer((req, res) => {
+      seen.push([req.url, req.headers["x-errorgap-project-key"]]);
+      if (req.method === "GET") {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(body));
+        return;
+      }
+      req.resume().on("end", () => {
+        res.writeHead(201);
+        res.end("{}");
+      });
+    });
+    return new Promise((resolve) =>
+      server!.listen(0, "127.0.0.1", () => resolve({ port: (server!.address() as AddressInfo).port, seen })),
+    );
+  }
+
+  it("stop a switched-off kind from being sent, and leave the rest", async () => {
+    const { port, seen } = await configServer({ errors_enabled: false, apm_enabled: true, poll_interval_seconds: 600 });
+    const client = new Client(
+      new Configuration({ projectSlug: "demo", apiKey: "key-demo", endpoint: `http://127.0.0.1:${port}`, logger: null, apmEnabled: true, remoteSettings: true }),
+    );
+    expect(await client.remote.refresh()).toBe(true);
+    expect(seen[0]).toEqual(["/api/projects/demo/config", "key-demo"]);
+
+    const dropped = await client.notify(new Error("x"), { sync: true });
+    expect(dropped.body).toBe("errors are switched off for this project");
+    const sent = await client.notifyTransaction({ durationMs: 1 }, { sync: true });
+    expect(sent.status).toBe(201);
+    client.remote.stop();
+  });
+
+  it("keep everything on when the settings cannot be read or the option is off", async () => {
+    const { port } = await configServer({}, 404);
+    const client = new Client(
+      new Configuration({ projectSlug: "demo", endpoint: `http://127.0.0.1:${port}`, logger: null, remoteSettings: true }),
+    );
+    expect(await client.remote.refresh()).toBe(false);
+    expect(client.remote.enabled("errors")).toBe(true);
+    client.remote.stop();
+
+    const off = new Client(
+      new Configuration({ projectSlug: "demo", endpoint: "http://127.0.0.1:1", logger: null, remoteSettings: false }),
+    );
+    expect(off.remote.enabled("errors")).toBe(true);
+  });
+});
