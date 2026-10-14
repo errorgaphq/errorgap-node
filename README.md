@@ -34,6 +34,53 @@ Errorgap.init({
 don't pass them. `init` installs `uncaughtException` and `unhandledRejection`
 hooks by default — pass `captureGlobals: false` to skip.
 
+After reporting an uncaught exception or unhandled rejection the SDK exits the
+process with code 1, as Node does when nothing listens for those events (a
+process that carries on after one is in an unknown state). It leaves the exit
+to you when your app has its own listener for the event, or with
+`exitOnUncaught: false`.
+
+### Filtering and dropping notices
+
+```ts
+Errorgap.init({
+  filterKeys: ["password", "token", /^ssn$/],
+  beforeNotify(notice) {
+    if (notice.errors[0]?.type === "AbortError") return false; // drop it
+    notice.context.team = "billing";                            // or change it
+  },
+});
+```
+
+`filterKeys` are masked at any depth in `params` and `session`. Values that
+cannot be serialized (cycles, bigints) and oversized strings or collections
+are cut rather than losing the notice.
+
+### Users, causes and releases
+
+`notify(err, { user: { id, email } })` names the user an error happened to;
+the Express error handler reads `req.user` for you. An error's `cause` chain
+is reported with it. `release` defaults to `ERRORGAP_RELEASE`, the hosting
+platform's commit variable (`SOURCE_VERSION`, `HEROKU_SLUG_COMMIT`,
+`RENDER_GIT_COMMIT`, `VERCEL_GIT_COMMIT_SHA`, …) or the git checkout, and
+`await Errorgap.trackRelease({ sha, branch })` records a deploy.
+
+### Remote settings
+
+Errors and performance data can each be switched off for a project in errorgap
+(Project settings › What SDKs send). Running apps follow within ten minutes,
+with no deploy: the SDK re-reads `GET /api/projects/:slug/config` in the
+background. If errorgap cannot be reached, everything stays on.
+`remoteSettings: false` (or `ERRORGAP_REMOTE_SETTINGS=false`) ignores the
+project's switches.
+
+### Delivery
+
+Notices are queued (at most `queueSize`, oldest dropped first) and sent a few
+at a time with a `timeout`. A send that fails on the network or with a 5xx is
+retried up to three times; after a 429 the SDK stops sending for the server's
+`Retry-After`. `await Errorgap.flush()` before a planned exit.
+
 ## Manual notification
 
 ```ts
@@ -88,6 +135,28 @@ API calls send an `x-errorgap-trace` header. The request handler records it,
 so the browser Performance view links each call to the server request that
 answered it. Cross-origin APIs need the header allowed by CORS and listed in
 the browser SDK's `performance.tracePropagationTargets`.
+
+### Automatic query and HTTP spans
+
+With `apmEnabled`, the SDK records spans on whichever transaction is running,
+with no code in your handlers:
+
+- SQL queries made through `pg`, `mysql2` (including `mysql2/promise`) and
+  `mysql`, with literals replaced by `?`;
+- outbound `fetch` and `http`/`https` calls, named by method and host
+  (`GET api.stripe.com`). Calls to errorgap itself are left out.
+
+The drivers are found in your app's `node_modules` at `init`. If yours are
+loaded differently (a bundler, a monorepo), pass them in:
+
+```ts
+import pg from "pg";
+import { instrumentPg } from "@errorgap/node";
+
+instrumentPg(pg); // also instrumentMysql2(mysql2), instrumentHttp()
+```
+
+`autoInstrument: false` turns all of it off.
 
 ## Transactions and jobs
 
@@ -161,12 +230,40 @@ names hashed (Security › Logins › Web apps › Privacy).
 | `rootDirectory` | `process.cwd()` | Used to mark frames as `in_app` |
 | `async` | `true` | Fire-and-forget delivery |
 | `logger` | `console` | Pass `null` to silence |
-| `filterKeys` | `["password", "token", "secret", ...]` | Substring match, case-insensitive |
+| `filterKeys` | `["password", "token", "secret", ...]` | Substrings (case-insensitive) or regexps, any depth |
+| `beforeNotify` | none | Change a notice, or return `false` to drop it |
+| `release` | `ERRORGAP_RELEASE`, platform commit variable, git checkout | Sent as `context.release` |
+| `trackRelease` | `false` | Record the release when the first error is reported |
+| `ignoreEnvironments` | `ERRORGAP_IGNORE_ENVIRONMENTS` or `[]` | Send nothing in these environments |
+| `timeout` | `5` | Seconds per request |
+| `queueSize` | `100` | Queued payloads; the oldest is dropped when full |
+| `remoteSettings` | `true` | Follow the project's switches in errorgap |
+| `exitOnUncaught` | `true` | Exit with code 1 after reporting an uncaught error |
 | `apmEnabled` | `false` | Send APM transactions |
+| `autoInstrument` | `true` | With APM on, record `pg`/`mysql2`/`mysql` queries and outbound HTTP as spans |
 | `apmSampleRate` | `1.0` | Fraction of transactions sent (errors are unaffected) |
 | `captureGlobals` | `true` | Install process error hooks |
 | `authEvents` | `false` | Send `signIn` events |
 | `appName` | `ERRORGAP_APP_NAME` or the project slug | The app's name in Security › Logins |
+
+## Command line
+
+The package ships an `errorgap` command for terminals and deploy scripts:
+
+```sh
+npx @errorgap/node test                                   # send a test error
+npx @errorgap/node deploy --sha "$GIT_SHA" --branch main  # record a release
+npx @errorgap/node sourcemaps dist --release "$GIT_SHA"   # upload every .map
+npx @errorgap/node settings                               # what the project's SDKs are told to send
+```
+
+It reads `ERRORGAP_ENDPOINT`, `ERRORGAP_PROJECT_SLUG`, `ERRORGAP_API_KEY` and,
+for `deploy` and `sourcemaps`, the project's secret `ERRORGAP_UPLOAD_KEY`
+(or `--endpoint`, `--project`, `--key`, `--upload-key`). `sourcemaps` files
+each map under the URL of its script: `dist/assets/app.js.map` becomes
+`/assets/app.js`, or `/static/assets/app.js` with `--url-prefix /static`.
+Every command exits non-zero when errorgap did not accept the request, so a
+deploy script can fail on it or ignore it.
 
 ## Verify
 

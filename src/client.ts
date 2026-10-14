@@ -5,20 +5,30 @@ import { currentTransactionId } from "./transaction-context.js";
 import { VERSION } from "./version.js";
 import { buildSignIn, signInPayload, type SignInOptions } from "./sign-ins.js";
 
-export interface DeliveryResult {
-  status?: number;
-  body?: string;
-  error?: unknown;
-  queued?: boolean;
-}
+import { Delivery, type DeliveryResult } from "./delivery.js";
+import { RemoteSettings } from "./remote-settings.js";
+
+export type { DeliveryResult } from "./delivery.js";
 
 export class Client {
-  private pending = new Set<Promise<unknown>>();
+  private releaseRecorded = false;
+  /** What errorgap wants this app to send (the project's remote settings). */
+  readonly remote = new RemoteSettings(() => this.configuration);
+  private delivery = new Delivery(() => ({
+    endpoint: this.configuration.endpoint,
+    projectSlug: this.configuration.projectSlug,
+    apiKey: this.configuration.apiKey,
+    timeout: this.configuration.timeout,
+    queueSize: this.configuration.queueSize,
+    userAgent: `errorgap-node/${VERSION}`,
+    warn: (message) => this.configuration.logger?.warn(message),
+  }));
 
   constructor(private configuration: Configuration) {}
 
   configure(configuration: Configuration): void {
     this.configuration = configuration;
+    this.remote.stop();
   }
 
   async notify(
@@ -27,18 +37,22 @@ export class Client {
   ): Promise<DeliveryResult> {
     try {
       this.configuration.validate();
-      const err = coerceError(error);
-      const notice = buildNotice(err, this.configuration, withTransaction(options));
-
-      if (options.sync || !this.configuration.async) {
-        const p = this.deliver(notice);
-        this.track(p);
-        return await p;
+      if (this.configuration.ignoredEnvironment()) return { status: 202, body: "ignored environment" };
+      if (!this.remote.enabled("errors")) {
+        return { status: 202, body: "errors are switched off for this project" };
       }
+      const err = coerceError(error);
+      const notice = await this.runHook(
+        buildNotice(err, this.configuration, withTransaction(options)),
+      );
+      if (!notice) return { status: 202, body: "dropped by beforeNotify" };
 
-      // Fire and forget. Tracked so flush() can await it.
-      this.track(this.deliver(notice));
-      return { queued: true, status: 202 };
+      if (this.configuration.trackRelease && !this.releaseRecorded) {
+        this.releaseRecorded = true;
+        void this.trackRelease({}, { sync: false });
+      }
+      if (options.sync || !this.configuration.async) return await this.deliver(notice);
+      return this.delivery.enqueue("notices", notice);
     } catch (exception) {
       this.log(exception);
       return { error: exception };
@@ -59,14 +73,14 @@ export class Client {
       this.log(exception);
       return { error: exception };
     }
-    if (!this.configuration.apmEnabled) return { status: 204 };
+    if (!this.configuration.apmEnabled || this.configuration.ignoredEnvironment()) return { status: 204 };
+    if (!this.remote.enabled("apm")) return { status: 204 };
     const rate = this.configuration.apmSampleRate;
     if (!(rate >= 1 || (rate > 0 && Math.random() < rate))) return { status: 204 };
 
-    const p = this.post("transactions", transactionPayload(transaction, this.configuration));
-    this.track(p);
-    if (options.sync || !this.configuration.async) return await p;
-    return { queued: true, status: 202 };
+    const payload = transactionPayload(transaction, this.configuration);
+    if (options.sync || !this.configuration.async) return await this.delivery.send("transactions", payload);
+    return this.delivery.enqueue("transactions", payload);
   }
 
   /**
@@ -80,56 +94,70 @@ export class Client {
       this.log(exception);
       return { error: exception };
     }
-    if (!this.configuration.authEvents) return { status: 204 };
+    if (!this.configuration.authEvents || this.configuration.ignoredEnvironment()) return { status: 204 };
     const event = buildSignIn(outcome, options);
     if (!event) {
       this.log(new Error(`unknown sign-in outcome ${JSON.stringify(outcome)}`));
       return { status: 204 };
     }
-    const p = this.post("logins/web", signInPayload(event, this.configuration));
-    this.track(p);
-    if (options.sync || !this.configuration.async) return await p;
-    return { queued: true, status: 202 };
+    const payload = signInPayload(event, this.configuration);
+    if (options.sync || !this.configuration.async) return await this.delivery.send("logins/web", payload);
+    return this.delivery.enqueue("logins/web", payload);
   }
 
-  /** Await every in-flight delivery. Use during graceful shutdown. */
-  async flush(): Promise<void> {
-    while (this.pending.size > 0) {
-      await Promise.all(Array.from(this.pending));
-    }
-  }
-
-  private track(promise: Promise<unknown>): void {
-    const wrapped = promise.catch(() => undefined);
-    this.pending.add(wrapped);
-    void wrapped.finally(() => this.pending.delete(wrapped));
-  }
-
-  async deliver(notice: NoticePayload): Promise<DeliveryResult> {
-    return this.post("notices", notice);
-  }
-
-  private async post(resource: string, payload: unknown): Promise<DeliveryResult> {
-    const url = projectUrl(this.configuration, resource);
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      "user-agent": `errorgap-node/${VERSION}`,
-    };
-    if (this.configuration.apiKey) {
-      headers["x-errorgap-project-key"] = this.configuration.apiKey;
-    }
-
+  /**
+   * Record a release with errorgap (Deploys), so errors are attributed to
+   * the deploy that shipped them. Defaults come from the configuration.
+   */
+  async trackRelease(
+    release: { version?: string; sha?: string; branch?: string; environment?: string } = {},
+    options: { sync?: boolean } = {},
+  ): Promise<DeliveryResult> {
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
-      const body = await safeBody(response);
-      return { status: response.status, body };
+      this.configuration.validate();
     } catch (exception) {
       this.log(exception);
       return { error: exception };
+    }
+    if (this.configuration.ignoredEnvironment()) return { status: 204 };
+    const payload: Record<string, string> = {};
+    const fields = {
+      version: release.version ?? this.configuration.release,
+      sha: release.sha ?? this.configuration.releaseSha,
+      branch: release.branch ?? this.configuration.releaseBranch,
+      environment: release.environment ?? this.configuration.environment,
+    };
+    for (const [key, value] of Object.entries(fields)) {
+      if (value) payload[key] = value;
+    }
+    if (!payload.version && !payload.sha) return { status: 204 };
+    if (options.sync === false) return this.delivery.enqueue("releases", payload);
+    return await this.delivery.send("releases", payload);
+  }
+
+  /** Await everything queued or being sent. Use during graceful shutdown. */
+  async flush(): Promise<void> {
+    await this.delivery.flush();
+  }
+
+  async deliver(notice: NoticePayload): Promise<DeliveryResult> {
+    return this.delivery.send("notices", notice);
+  }
+
+  /**
+   * A hook that throws is logged and skipped: a bug in a filter must not
+   * lose the error it was filtering.
+   */
+  private async runHook(notice: NoticePayload): Promise<NoticePayload | null> {
+    const hook = this.configuration.beforeNotify;
+    if (!hook) return notice;
+    try {
+      const result = await hook(notice);
+      if (result === false || result === null) return null;
+      return result && typeof result === "object" && Array.isArray(result.errors) ? result : notice;
+    } catch (exception) {
+      this.log(exception);
+      return notice;
     }
   }
 

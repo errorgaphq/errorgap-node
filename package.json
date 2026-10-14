@@ -1,6 +1,6 @@
 {
   "name": "@errorgap/node",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Node.js notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
@@ -37,6 +37,9 @@
       "require": "./dist/fastify.cjs"
     },
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "errorgap": "./dist/cli.cjs"
   },
   "files": [
     "dist",

@@ -22,27 +22,55 @@ function processHandlerState(): ProcessHandlerState {
   return state;
 }
 
-export function installProcessHandlers(client: Client): void {
+export interface ProcessHandlerOptions {
+  /**
+   * After reporting an uncaught exception or unhandled rejection, end the
+   * process as Node would have (exit code 1) when no other listener is
+   * handling it. Defaults to `true`.
+   */
+  exitOnUncaught?: boolean;
+}
+
+/** How long a crashing process waits for its last report. */
+const EXIT_FLUSH_MS = 2000;
+
+export function installProcessHandlers(client: Client, options: ProcessHandlerOptions = {}): void {
   const state = processHandlerState();
   if (state.installed) return;
   state.installed = true;
+  const exitOnUncaught = options.exitOnUncaught ?? true;
 
-  state.uncaughtHandler = (err: Error) => {
-    void client.notify(err, {
-      sync: true,
-      context: { source: "uncaughtException" },
-    });
+  // Listening for these events turns off Node's own handling of them, which
+  // is to print the error and exit. Report, then do that ourselves: a
+  // process that keeps running after an uncaught exception is in an unknown
+  // state.
+  const report = (error: unknown, event: "uncaughtException" | "unhandledRejection") => {
+    const sent = client
+      .notify(error, { sync: true, context: { source: event } })
+      .catch(() => undefined);
+    if (!exitOnUncaught || process.listenerCount(event) > 1) return;
+    if (event === "unhandledRejection" && !rejectionsAreFatal()) return;
+
+    console.error(error);
+    process.exitCode = 1;
+    const deadline = new Promise((resolve) => setTimeout(resolve, EXIT_FLUSH_MS));
+    void Promise.race([sent, deadline]).then(() => process.exit(1));
   };
 
-  state.rejectionHandler = (reason: unknown) => {
-    void client.notify(reason, {
-      sync: true,
-      context: { source: "unhandledRejection" },
-    });
-  };
+  state.uncaughtHandler = (err: Error) => report(err, "uncaughtException");
+  state.rejectionHandler = (reason: unknown) => report(reason, "unhandledRejection");
 
   process.on("uncaughtException", state.uncaughtHandler);
   process.on("unhandledRejection", state.rejectionHandler);
+}
+
+/** Node exits on an unhandled rejection unless started with `--unhandled-rejections=warn|none`. */
+function rejectionsAreFatal(): boolean {
+  const flags = [...process.execArgv, ...(process.env.NODE_OPTIONS ?? "").split(/\s+/)];
+  const mode = flags
+    .map((flag) => flag.match(/^--unhandled-rejections=(.+)$/)?.[1])
+    .find((value) => value !== undefined);
+  return mode !== "warn" && mode !== "none";
 }
 
 export function uninstallProcessHandlers(): void {
